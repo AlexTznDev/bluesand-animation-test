@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { parseSvgToPoints } from './svg-parser';
 import { ParticleSystem } from './particles';
+import './style.css';
 import svgContent from './assets/Union.svg?raw';
 
 async function init() {
