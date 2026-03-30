@@ -102,4 +102,8 @@ async function init() {
   animate();
 }
 
-init().catch(console.error);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => init().catch(console.error));
+} else {
+  init().catch(console.error);
+}
