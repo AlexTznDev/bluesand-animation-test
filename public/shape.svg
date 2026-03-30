@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <!-- 4-pointed star / compass shape -->
+  <path d="
+    M 200 10
+    L 230 170
+    L 390 200
+    L 230 230
+    L 200 390
+    L 170 230
+    L 10 200
+    L 170 170
+    Z
+  " fill="#FF6600" />
+  <!-- Top bar -->
+  <rect x="185" y="0" width="30" height="170" fill="#FF6600" />
+  <!-- Bottom bar -->
+  <rect x="185" y="230" width="30" height="170" fill="#FF6600" />
+  <!-- Left bar -->
+  <rect x="0" y="185" width="170" height="30" fill="#FF6600" />
+  <!-- Right bar -->
+  <rect x="230" y="185" width="170" height="30" fill="#FF6600" />
+</svg>
