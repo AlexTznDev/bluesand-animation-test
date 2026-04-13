@@ -4,7 +4,6 @@ import { ParticleSystem } from './particles';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import './style.css';
-import { ClippingGroup } from 'three/webgpu';
 
 gsap.registerPlugin(ScrollTrigger);
 
