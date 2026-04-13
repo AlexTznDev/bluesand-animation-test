@@ -31,8 +31,13 @@ export async function parseSvgToPoints(
   }
 
   const vb = svgEl.getAttribute('viewBox')?.split(' ').map(Number);
-  const w = vb ? vb[2] : parseInt(svgEl.getAttribute('width') || '400');
-  const h = vb ? vb[3] : parseInt(svgEl.getAttribute('height') || '400');
+  const rawW = vb ? vb[2] : parseInt(svgEl.getAttribute('width') || '400');
+  const rawH = vb ? vb[3] : parseInt(svgEl.getAttribute('height') || '400');
+
+  const CANVAS_SIZE = 400;
+  const scale = CANVAS_SIZE / Math.max(rawW, rawH);
+  const w = Math.round(rawW * scale);
+  const h = Math.round(rawH * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = w;

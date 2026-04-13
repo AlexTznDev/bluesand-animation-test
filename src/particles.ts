@@ -220,9 +220,7 @@ export class ParticleSystem {
   }
 
   update(time: number) {
-    if (this.reconstructionStartTime < 0) {
-      this.reconstructionStartTime = time;
-    }
+    if (this.reconstructionStartTime < 0) return;
 
     const elapsed = time - this.reconstructionStartTime;
 
@@ -257,9 +255,42 @@ export class ParticleSystem {
           ? Math.sin(time * 12 + this.wobblePhase[i]) * this.wobbleAmp[i] * (1 - t)
           : 0;
 
-        this.positions[i3] = sx + (ox - sx) * eased + drift + wobble;
-        this.positions[i3 + 1] = sy + (oy - sy) * eased;
-        this.positions[i3 + 2] = sz + (oz - sz) * eased;
+        let px = sx + (ox - sx) * eased + drift + wobble;
+        let py = sy + (oy - sy) * eased;
+        const pz = sz + (oz - sz) * eased;
+
+        let vx = this.velocities[i3];
+        let vy = this.velocities[i3 + 1];
+
+        if (velocityForce > 0.001) {
+          const dx = ox - this.mouseWorld.x;
+          const dy = oy - this.mouseWorld.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < mouseRadius && dist > 0.001) {
+            const falloff = 1 - dist / mouseRadius;
+            const force = falloff * falloff * velocityForce;
+            const spreadAngle = (Math.random() - 0.5) * 2.0;
+            const baseAngle = Math.atan2(dy, dx);
+            const angle = baseAngle + spreadAngle;
+            const particleVariation = 0.5 + Math.random() * 1.0;
+            vx += Math.cos(angle) * force * particleVariation;
+            vy += Math.sin(angle) * force * particleVariation;
+          }
+        }
+
+        vx *= 0.94;
+        vy *= 0.94;
+
+        px += vx;
+        py += vy;
+
+        this.velocities[i3] = vx;
+        this.velocities[i3 + 1] = vy;
+
+        this.positions[i3] = px;
+        this.positions[i3 + 1] = py;
+        this.positions[i3 + 2] = pz;
 
         const startOp = this.startOpacities[i];
         this.opacities[i] = t > 0 ? startOp + (1 - startOp) * Math.min(1, t * 2) : startOp;
@@ -323,3 +354,5 @@ export class ParticleSystem {
     this.material.dispose();
   }
 }
+
+

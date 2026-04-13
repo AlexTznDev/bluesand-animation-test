@@ -1,18 +1,17 @@
 import * as THREE from 'three';
 import { parseSvgToPoints } from './svg-parser';
 import { ParticleSystem } from './particles';
+import { gsap } from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import './style.css';
-import svgContent from './assets/Union.svg?raw';
+import { ClippingGroup } from 'three/webgpu';
 
-async function init() {
-  const container = document.getElementById('canvas');
-  if (!container) {
-    console.error('ParticleAnimation: no element with id="canvas" found.');
-    return;
-  }
+gsap.registerPlugin(ScrollTrigger);
 
+async function initCanvas(container: HTMLElement, svgContent: string) {
   const canvasEl = document.createElement('canvas');
-  canvasEl.style.display = 'block';
+  canvasEl.style.position = 'absolute';
+  canvasEl.style.inset = '0';
   canvasEl.style.width = '100%';
   canvasEl.style.height = '100%';
   container.appendChild(canvasEl);
@@ -28,7 +27,8 @@ async function init() {
   const scene = new THREE.Scene();
 
   const aspect = w / h;
-  const frustumSize = 1.2;
+  const sizePercent = parseFloat(container.getAttribute('size-canvas') ?? '80');
+  const frustumSize = 50 / sizePercent;
   const camera = new THREE.OrthographicCamera(
     -frustumSize * aspect,
     frustumSize * aspect,
@@ -37,12 +37,18 @@ async function init() {
     0.1,
     100,
   );
+  const topOffset = parseFloat(container.getAttribute('top') ?? '0');
+  const leftOffset = parseFloat(container.getAttribute('left') ?? '0');
   camera.position.z = 2;
+  camera.position.y = (topOffset / 100) * frustumSize * 2;
+  camera.position.x = (leftOffset / 100) * frustumSize * aspect * 2;
 
-  const { points: targets, cellSize } = await parseSvgToPoints(svgContent, 3);
+  const { points: targets, cellSize } = await parseSvgToPoints(svgContent, 2);
+
+  const color = container.getAttribute('color') ?? '#FFB347';
 
   const particles = new ParticleSystem(targets, {
-    color: '#FFB347',
+    color,
     cellSize,
     spread: 2.0,
     reconstructionDuration: 1.8,
@@ -57,7 +63,7 @@ async function init() {
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
   function onMouseMove(e: MouseEvent) {
-    const rect = container!.getBoundingClientRect();
+    const rect = container.getBoundingClientRect();
     mouseNdc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouseNdc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
@@ -73,8 +79,8 @@ async function init() {
   container.addEventListener('mouseleave', onMouseLeave);
 
   const ro = new ResizeObserver(() => {
-    const cw = container!.clientWidth;
-    const ch = container!.clientHeight;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
     const a = cw / ch;
     renderer.setSize(cw, ch);
     camera.left = -frustumSize * a;
@@ -86,20 +92,55 @@ async function init() {
   });
   ro.observe(container);
 
-  const clock = new THREE.Clock();
-  particles.startReconstruction(0);
+  const startTime = performance.now();
+  let started = false;
+
+  function elapsed() {
+    return (performance.now() - startTime) / 1000;
+  }
 
   function animate() {
     requestAnimationFrame(animate);
-    const elapsed = clock.getElapsedTime();
-
     particles.setMouse(mouseWorld);
-    particles.update(elapsed);
-
+    particles.update(elapsed());
     renderer.render(scene, camera);
   }
 
   animate();
+
+  ScrollTrigger.create({
+    trigger: container,
+    start: '50% bottom',
+    markers: false,
+    onEnter: () => {
+      if (!started) {
+        started = true;
+        particles.startReconstruction(elapsed());
+      }
+    },
+  });
+}
+
+async function init() {
+  const svgModules = import.meta.glob('./assets/*.svg', { query: '?raw', eager: true });
+  const svgList = Object.values(svgModules).map(m => (m as { default: string }).default);
+
+  if (svgList.length === 0) {
+    console.error('ParticleAnimation: no SVG found in assets/');
+    return;
+  }
+
+  const ids = ['canvas', 'canvas-2', 'canvas-3', 'canvas-4'];
+
+  const found = ids
+    .map((id, index) => ({ el: document.getElementById(id), svg: svgList[index] }))
+    .filter(({ el, svg }) => el !== null && svg !== undefined);
+
+  console.log(`ParticleAnimation: ${found.length} canvas trouvé(s)`);
+
+  const tasks = found.map(({ el, svg }) => initCanvas(el as HTMLElement, svg));
+
+  await Promise.all(tasks);
 }
 
 if (document.readyState === 'loading') {
@@ -107,3 +148,5 @@ if (document.readyState === 'loading') {
 } else {
   init().catch(console.error);
 }
+
+
