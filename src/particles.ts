@@ -162,12 +162,13 @@ export class ParticleSystem {
       this.velocities[i3 + 1] = 0;
       this.velocities[i3 + 2] = 0;
 
-      this.startOpacities[i] = 0.0;
-      this.opacities[i] = 0.0;
+      const earlyVisible = Math.random() < 0.1;
+      this.startOpacities[i] = earlyVisible ? 0.6 + Math.random() * 0.4 : 0.0;
+      this.opacities[i] = this.startOpacities[i];
 
       const distFromCenter = Math.sqrt(t.x * t.x + t.y * t.y);
-      const jitter = (Math.random() - 0.5) * staggerDuration * 0.3;
-      this.delays[i] = Math.max(0, distFromCenter * staggerDuration * 1.5 + jitter + Math.random() * 0.4);
+      const jitter = (Math.random() - 0.5) * staggerDuration * 0.2;
+      this.delays[i] = Math.max(0, distFromCenter * staggerDuration * 0.8 + jitter);
 
       this.durations[i] = reconstructionDuration * (0.7 + Math.random() * 0.8);
 
@@ -309,12 +310,13 @@ export class ParticleSystem {
         this.positions[i3 + 1] = py;
         this.positions[i3 + 2] = pz;
 
+        const startOp = this.startOpacities[i];
         if (t <= 0) {
-          this.opacities[i] = 0;
+          this.opacities[i] = startOp;
         } else if (i % 2 === 0) {
-          this.opacities[i] = eased * eased;
+          this.opacities[i] = startOp + (1 - startOp) * eased * eased;
         } else {
-          this.opacities[i] = t >= 0.95 ? Math.min(1, (t - 0.95) / 0.05) : 0;
+          this.opacities[i] = t >= 0.95 ? startOp + (1 - startOp) * Math.min(1, (t - 0.95) / 0.05) : startOp;
         }
       } else {
         let px = this.positions[i3];
