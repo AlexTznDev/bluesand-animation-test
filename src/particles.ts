@@ -168,8 +168,9 @@ export class ParticleSystem {
 
       const distFromCenter = Math.sqrt(t.x * t.x + t.y * t.y);
       const jitter = (Math.random() - 0.5) * staggerDuration * 0.15;
-      this.delays[i] = Math.max(0, (distFromCenter * 0.4 + rand * 0.6) * staggerDuration * 0.5 + jitter);
-      this.durations[i] = reconstructionDuration * (0.5 + rand * 0.7);
+      const delayRaw = (distFromCenter * 0.4 + rand * 0.6) * staggerDuration * 0.5 + jitter;
+      this.delays[i] = Math.max(0, Math.min(delayRaw, staggerDuration * 0.6));
+      this.durations[i] = reconstructionDuration * (0.5 + rand * 0.4);
 
       this.driftX[i] = (Math.random() - 0.5) * 0.3;
       this.driftFreq[i] = 0.5 + Math.random() * 1.0;
