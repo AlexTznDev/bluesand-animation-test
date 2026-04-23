@@ -145,12 +145,9 @@ export class ParticleSystem {
       this.origins[i3 + 1] = t.y;
       this.origins[i3 + 2] = 0;
 
-      const earlyVisible = Math.random() < 0.1;
-
+      const rand = Math.random();
       const angle = Math.random() * Math.PI * 2;
-      const radius = earlyVisible
-        ? spread * (0.1 + Math.random() * 0.3)
-        : spread * (0.6 + Math.random() * 1.4);
+      const radius = spread * (0.2 + rand * 1.6);
       const sx = t.x + Math.cos(angle) * radius;
       const sy = t.y + Math.sin(angle) * radius;
 
@@ -167,18 +164,12 @@ export class ParticleSystem {
       this.velocities[i3 + 2] = 0;
 
       this.startOpacities[i] = 0.0;
-      this.opacities[i] = this.startOpacities[i];
+      this.opacities[i] = 0.0;
 
       const distFromCenter = Math.sqrt(t.x * t.x + t.y * t.y);
-      const jitter = (Math.random() - 0.5) * staggerDuration * 0.2;
-
-      if (earlyVisible) {
-        this.delays[i] = 0;
-        this.durations[i] = reconstructionDuration * (0.5 + Math.random() * 0.3);
-      } else {
-        this.delays[i] = Math.max(0, distFromCenter * staggerDuration * 0.4 + jitter);
-        this.durations[i] = reconstructionDuration * (0.6 + Math.random() * 0.6);
-      }
+      const jitter = (Math.random() - 0.5) * staggerDuration * 0.15;
+      this.delays[i] = Math.max(0, (distFromCenter * 0.4 + rand * 0.6) * staggerDuration * 0.5 + jitter);
+      this.durations[i] = reconstructionDuration * (0.5 + rand * 0.7);
 
       this.driftX[i] = (Math.random() - 0.5) * 0.3;
       this.driftFreq[i] = 0.5 + Math.random() * 1.0;
