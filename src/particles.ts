@@ -137,14 +137,6 @@ export class ParticleSystem {
     this.wobblePhase = new Float32Array(this.count);
     this.wobbleAmp = new Float32Array(this.count);
 
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const t of targets) {
-      if (t.y < minY) minY = t.y;
-      if (t.y > maxY) maxY = t.y;
-    }
-    const rangeY = maxY - minY || 1;
-
     for (let i = 0; i < this.count; i++) {
       const t = targets[i];
       const i3 = i * 3;
