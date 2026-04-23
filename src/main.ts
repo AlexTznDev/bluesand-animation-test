@@ -42,7 +42,7 @@ async function initCanvas(container: HTMLElement, svgContent: string) {
   camera.position.y = (topOffset / 100) * frustumSize * 2;
   camera.position.x = (leftOffset / 100) * frustumSize * aspect * 2;
 
-  const { points: targets, cellSize } = await parseSvgToPoints(svgContent, 2);
+  const { points: targets, cellSize } = await parseSvgToPoints(svgContent, 1);
 
   const color = container.getAttribute('color') ?? '#FFB347';
 
@@ -50,8 +50,8 @@ async function initCanvas(container: HTMLElement, svgContent: string) {
     color,
     cellSize,
     spread: 2.0,
-    reconstructionDuration: 1.8,
-    staggerDuration: 2.2,
+    reconstructionDuration: 3.5,
+    staggerDuration: 4.0,
   });
   scene.add(particles.points);
   particles.updatePointSize(camera, h);
