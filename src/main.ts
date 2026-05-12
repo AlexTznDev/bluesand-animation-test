@@ -54,7 +54,7 @@ async function initCanvas(container: HTMLElement, svgContent: string) {
     staggerDuration: 4.0,
   });
   scene.add(particles.points);
-  particles.updatePointSize(camera, h);
+  particles.updatePointSize(camera, h, renderer.getPixelRatio());
 
   const raycaster = new THREE.Raycaster();
   const mouseNdc = new THREE.Vector2(9999, 9999);
@@ -87,7 +87,7 @@ async function initCanvas(container: HTMLElement, svgContent: string) {
     camera.top = frustumSize;
     camera.bottom = -frustumSize;
     camera.updateProjectionMatrix();
-    particles.updatePointSize(camera, ch);
+    particles.updatePointSize(camera, ch, renderer.getPixelRatio());
   });
   ro.observe(container);
 

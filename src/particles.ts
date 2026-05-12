@@ -206,9 +206,10 @@ export class ParticleSystem {
 
   private _cellSize: number;
 
-  updatePointSize(camera: THREE.OrthographicCamera, viewportHeight: number) {
+  updatePointSize(camera: THREE.OrthographicCamera, viewportHeight: number, pixelRatio?: number) {
     const cameraHeight = camera.top - camera.bottom;
-    const pixelSize = (this._cellSize / cameraHeight) * viewportHeight * window.devicePixelRatio;
+    const dpr = pixelRatio ?? Math.min(window.devicePixelRatio, 2);
+    const pixelSize = (this._cellSize / cameraHeight) * viewportHeight * dpr;
     this.material.uniforms.uPointSize.value = Math.ceil(pixelSize) + 1.5;
   }
 
