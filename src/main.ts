@@ -12,7 +12,7 @@ async function initCanvas(container: HTMLElement, svgContent: string) {
   const h = container.clientHeight;
   const aspect = w / h;
 
-  container.style.position = 'relative';
+  container.style.position = 'absolute';
 
   const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
