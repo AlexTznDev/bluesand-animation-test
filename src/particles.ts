@@ -2,380 +2,276 @@ import * as THREE from 'three';
 import type { ParticleTarget } from './svg-parser';
 
 const VERTEX_SHADER = /* glsl */ `
-  attribute float opacity;
+  attribute vec3  aStart;
+  attribute float aPhase;
+  attribute float aSpeed;
+  attribute float aSize;
+  attribute vec2  aOffset;
+
+  uniform float uOpacity;
+  uniform float uGather;
+  uniform float uDirection;      // 0 = ltr, 1 = ttb, 2 = btt
+  uniform float uFunnelStrength; // 0 = pas d'entonnoir, 1 = entonnoir plein
   uniform float uPointSize;
-  varying float vOpacity;
+
+  varying float vAlpha;
 
   void main() {
-    vOpacity = opacity;
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = uPointSize;
-    gl_Position = projectionMatrix * mvPosition;
+    // Wave direction: 0=LTR, 1=TTB, 2=BTT
+    float waveNorm = uDirection < 0.5
+      ? clamp((position.x + 0.5), 0.0, 1.0)          // LTR: left first
+      : (uDirection < 1.5
+        ? clamp((-position.y + 0.5), 0.0, 1.0)        // TTB: top first
+        : clamp((position.y + 0.5), 0.0, 1.0));        // BTT: bottom first
+
+    float delay  = clamp(pow(waveNorm, 0.7) * 0.96 + sin(aPhase) * 0.03, 0.0, 0.98);
+    float localT = clamp((uGather - delay) / max(0.01, 1.0 - delay), 0.0, 1.0);
+
+    float drag   = 2.8 + (1.0 - aSpeed) * 2.0;
+    float tEased = 1.0 - pow(1.0 - localT, drag);
+    float t      = tEased;
+
+    // Bezier entonnoir — uFunnelStrength contrôle l'intensité de la convergence
+    float ctrlX = uDirection < 0.5
+      ? mix(aStart.x, position.x, 0.7)
+      : mix(position.x, 0.0, uFunnelStrength);
+    float ctrlY = uDirection < 0.5
+      ? mix(position.y, 0.0, uFunnelStrength)
+      : mix(aStart.y, position.y, 0.7);
+
+    vec3 pos;
+    pos.x = (1.0-t)*(1.0-t)*aStart.x + 2.0*(1.0-t)*t*ctrlX + t*t*position.x;
+    pos.y = (1.0-t)*(1.0-t)*aStart.y + 2.0*(1.0-t)*t*ctrlY + t*t*position.y;
+    pos.z = 0.0;
+
+    // CPU hover offset
+    pos.xy += aOffset;
+
+    vAlpha = uOpacity * smoothstep(0.0, 0.08, localT);
+
+    gl_Position  = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+    gl_PointSize = uPointSize * aSize;
   }
 `;
 
 const FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uColor;
-  varying float vOpacity;
+  varying float vAlpha;
 
   void main() {
-    gl_FragColor = vec4(uColor, vOpacity);
+    vec2  uv = gl_PointCoord - 0.5;
+    float d  = length(uv);
+    float a  = 1.0 - smoothstep(0.48, 0.5, d);
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(uColor, a * vAlpha);
   }
 `;
 
+export type Direction = 'ltr' | 'ttb' | 'btt';
+
 export interface ParticleSystemOptions {
-  color?: string;
-  cellSize?: number;
-  spread?: number;
-  reconstructionDuration?: number;
-  staggerDuration?: number;
+  color?:          string;
+  cellSize?:       number;
+  spread?:         number;
+  direction?:      Direction;
+  funnelStrength?: number;
 }
 
-const EASE_COUNT = 6;
-
-function easeSlowThenSnap(t: number): number {
-  if (t < 0.6) return 0.15 * Math.pow(t / 0.6, 0.4);
-  const p = (t - 0.6) / 0.4;
-  return 0.15 + 0.85 * (1 - Math.pow(1 - p, 5));
-}
-
-function easeDrift(t: number): number {
-  if (t < 0.55) return 0.1 * Math.pow(t / 0.55, 0.3);
-  const p = (t - 0.55) / 0.45;
-  return 0.1 + 0.9 * p * p * p;
-}
-
-function easeWander(t: number): number {
-  if (t < 0.5) return 0.2 * t * t * 4;
-  const p = (t - 0.5) / 0.5;
-  return 0.2 + 0.8 * (1 - Math.pow(1 - p, 4));
-}
-
-function easeLazy(t: number): number {
-  if (t < 0.65) return 0.08 * Math.sin(t / 0.65 * Math.PI * 0.5);
-  const p = (t - 0.65) / 0.35;
-  return 0.08 + 0.92 * p * p;
-}
-
-function easeFloat(t: number): number {
-  if (t < 0.7) return 0.12 * Math.pow(t / 0.7, 0.5);
-  const p = (t - 0.7) / 0.3;
-  return 0.12 + 0.88 * (1 - Math.pow(1 - p, 6));
-}
-
-function easeCreep(t: number): number {
-  if (t < 0.45) return 0.18 * Math.pow(t / 0.45, 0.6);
-  const p = (t - 0.45) / 0.55;
-  return 0.18 + 0.82 * (1 - Math.pow(1 - p, 3.5));
-}
-
-function applyEase(t: number, easeType: number): number {
-  switch (easeType) {
-    case 0: return easeSlowThenSnap(t);
-    case 1: return easeDrift(t);
-    case 2: return easeWander(t);
-    case 3: return easeLazy(t);
-    case 4: return easeFloat(t);
-    case 5: return easeCreep(t);
-    default: return easeWander(t);
-  }
+function gauss(sigma = 1): number {
+  const u = 1 - Math.random();
+  const v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v) * sigma;
 }
 
 export class ParticleSystem {
   readonly points: THREE.Points;
+  readonly uniforms: {
+    uOpacity:        { value: number };
+    uGather:         { value: number };
+    uDirection:      { value: number };
+    uFunnelStrength: { value: number };
+    uColor:          { value: THREE.Color };
+    uPointSize:      { value: number };
+  };
 
-  private geometry: THREE.BufferGeometry;
-  private material: THREE.ShaderMaterial;
+  private geometry:  THREE.BufferGeometry;
+  private material:  THREE.ShaderMaterial;
+  private cellSize:  number;
+  private count:     number;
 
-  private count: number;
-  private origins: Float32Array;
-  private startPositions: Float32Array;
-  private positions: Float32Array;
-  private velocities: Float32Array;
-  private opacities: Float32Array;
-  private delays: Float32Array;
-  private durations: Float32Array;
-  private driftX: Float32Array;
-  private driftFreq: Float32Array;
-  private startOpacities: Float32Array;
-  private easeTypes: Uint8Array;
-  private wobblePhase: Float32Array;
-  private wobbleAmp: Float32Array;
+  private origins:   Float32Array;
+  private hoverVel:  Float32Array;
+  private hoverOff:  Float32Array;
 
-  private maxDuration: number;
-
-  private isReconstructed = false;
-  private reconstructionStartTime = -1;
-
-  private mouseWorld = new THREE.Vector3(9999, 9999, 0);
-  private prevMouseWorld = new THREE.Vector3(9999, 9999, 0);
-  private mouseVelocity = 0;
+  private mouseX      = 9999;
+  private mouseY      = 9999;
+  private mouseVel    = 0;
+  private hoverActive = false;
 
   constructor(targets: ParticleTarget[], options: ParticleSystemOptions = {}) {
     const {
-      color = '#FE7800',
-      cellSize = 0.01,
-      spread = 2.0,
-      reconstructionDuration = 1.4,
-      staggerDuration = 2.2,
+      color          = '#FFB347',
+      cellSize       = 0.01,
+      spread         = 0.35,
+      direction      = 'ltr',
+      funnelStrength = 1.0,
     } = options;
 
-    this.count = targets.length;
-    this.maxDuration = 0;
+    this.cellSize = cellSize;
+    this.count    = targets.length;
 
-    this.origins = new Float32Array(this.count * 3);
-    this.startPositions = new Float32Array(this.count * 3);
-    this.positions = new Float32Array(this.count * 3);
-    this.velocities = new Float32Array(this.count * 3);
-    this.opacities = new Float32Array(this.count);
-    this.delays = new Float32Array(this.count);
-    this.durations = new Float32Array(this.count);
-    this.driftX = new Float32Array(this.count);
-    this.driftFreq = new Float32Array(this.count);
-    this.startOpacities = new Float32Array(this.count);
-    this.easeTypes = new Uint8Array(this.count);
-    this.wobblePhase = new Float32Array(this.count);
-    this.wobbleAmp = new Float32Array(this.count);
+    const positions = new Float32Array(this.count * 3);
+    const aStart    = new Float32Array(this.count * 3);
+    const aPhase    = new Float32Array(this.count);
+    const aSpeed    = new Float32Array(this.count);
+    const aSize     = new Float32Array(this.count);
+    const aOffset   = new Float32Array(this.count * 2);
+
+    this.origins  = new Float32Array(this.count * 2);
+    this.hoverVel = new Float32Array(this.count * 2);
+    this.hoverOff = new Float32Array(this.count * 2);
 
     for (let i = 0; i < this.count; i++) {
-      const t = targets[i];
       const i3 = i * 3;
+      const i2 = i * 2;
+      const t  = targets[i];
 
-      this.origins[i3] = t.x;
-      this.origins[i3 + 1] = t.y;
-      this.origins[i3 + 2] = 0;
+      positions[i3]     = t.x;
+      positions[i3 + 1] = t.y;
+      positions[i3 + 2] = 0;
 
-      const rand = Math.random();
-      const angle = Math.random() * Math.PI * 2;
-      const radius = spread * (0.2 + rand * 1.6);
-      const sx = t.x + Math.cos(angle) * radius;
-      const sy = t.y + Math.sin(angle) * radius;
+      this.origins[i2]     = t.x;
+      this.origins[i2 + 1] = t.y;
 
-      this.startPositions[i3] = sx;
-      this.startPositions[i3 + 1] = sy;
-      this.startPositions[i3 + 2] = 0;
+      if (direction === 'ltr') {
+        aStart[i3]     = spread * 1.4 + gauss(spread * 0.15);
+        aStart[i3 + 1] = gauss(spread * 0.8);
+      } else if (direction === 'ttb') {
+        aStart[i3]     = gauss(spread * 0.8);
+        aStart[i3 + 1] = spread * 1.4 + gauss(spread * 0.15);
+      } else {
+        // BTT
+        aStart[i3]     = gauss(spread * 0.8);
+        aStart[i3 + 1] = spread * 1.4 + gauss(spread * 0.15);
+      }
+      aStart[i3 + 2] = 0;
 
-      this.positions[i3] = sx;
-      this.positions[i3 + 1] = sy;
-      this.positions[i3 + 2] = 0;
-
-      this.velocities[i3] = 0;
-      this.velocities[i3 + 1] = 0;
-      this.velocities[i3 + 2] = 0;
-
-      this.startOpacities[i] = 0.0;
-      this.opacities[i] = 0.0;
-
-      const distFromCenter = Math.sqrt(t.x * t.x + t.y * t.y);
-      const jitter = (Math.random() - 0.5) * staggerDuration * 0.15;
-      const delayRaw = (distFromCenter * 0.4 + rand * 0.6) * staggerDuration * 0.5 + jitter;
-      this.delays[i] = Math.max(0, Math.min(delayRaw, staggerDuration * 0.6));
-      this.durations[i] = reconstructionDuration * (0.5 + rand * 0.4);
-
-      this.driftX[i] = (Math.random() - 0.5) * 0.3;
-      this.driftFreq[i] = 0.5 + Math.random() * 1.0;
-
-      this.easeTypes[i] = Math.floor(Math.random() * EASE_COUNT);
-
-      this.wobblePhase[i] = Math.random() * Math.PI * 2;
-      this.wobbleAmp[i] = 0.008 + Math.random() * 0.025;
-
-      const endTime = this.delays[i] + this.durations[i];
-      if (endTime > this.maxDuration) this.maxDuration = endTime;
+      aPhase[i] = Math.random() * Math.PI * 2;
+      aSpeed[i] = Math.random() * 0.3 + 0.08;
+      aSize[i]  = 0.86;
     }
 
+    this.uniforms = {
+      uOpacity:        { value: 0 },
+      uGather:         { value: 0 },
+      uDirection:      { value: direction === 'ltr' ? 0 : direction === 'ttb' ? 1 : 2 },
+      uFunnelStrength: { value: funnelStrength },
+      uColor:          { value: new THREE.Color(color) },
+      uPointSize:      { value: 2 },
+    };
+
     this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('opacity', new THREE.BufferAttribute(this.opacities, 1));
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.geometry.setAttribute('aStart',   new THREE.BufferAttribute(aStart,    3));
+    this.geometry.setAttribute('aPhase',   new THREE.BufferAttribute(aPhase,    1));
+    this.geometry.setAttribute('aSpeed',   new THREE.BufferAttribute(aSpeed,    1));
+    this.geometry.setAttribute('aSize',    new THREE.BufferAttribute(aSize,     1));
+    this.geometry.setAttribute('aOffset',  new THREE.BufferAttribute(aOffset,   2));
 
     this.material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX_SHADER,
+      vertexShader:   VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
-      uniforms: {
-        uColor: { value: new THREE.Color(color) },
-        uPointSize: { value: 1 },
-      },
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.NormalBlending,
+      uniforms:       this.uniforms as Record<string, THREE.IUniform>,
+      transparent:    true,
+      depthWrite:     false,
     });
 
     this.points = new THREE.Points(this.geometry, this.material);
-    this._cellSize = cellSize;
   }
-
-  private _cellSize: number;
 
   updatePointSize(camera: THREE.OrthographicCamera, viewportHeight: number, pixelRatio?: number) {
     const cameraHeight = camera.top - camera.bottom;
     const dpr = pixelRatio ?? Math.min(window.devicePixelRatio, 2);
-    const pixelSize = (this._cellSize / cameraHeight) * viewportHeight * dpr;
-    this.material.uniforms.uPointSize.value = Math.ceil(pixelSize) + 1.5;
+    const effectivePixels = Math.min(viewportHeight * dpr, 1800);
+    const pixelSize = (this.cellSize / cameraHeight) * effectivePixels;
+    this.uniforms.uPointSize.value = Math.ceil(pixelSize * 1.45 + 1.5);
   }
 
-  startReconstruction(time: number) {
-    this.reconstructionStartTime = time;
-    this.isReconstructed = false;
+  setMouse(x: number, y: number, ndcVelocity = 0) {
+    const isSentinel  = x > 9000 || y > 9000;
+    const wasSentinel = this.mouseX > 9000 || this.mouseY > 9000;
+    this.mouseX  = x;
+    this.mouseY  = y;
+    this.mouseVel = (wasSentinel || isSentinel) ? 0 : ndcVelocity;
   }
 
-  setMouse(worldPos: THREE.Vector3) {
-    this.prevMouseWorld.copy(this.mouseWorld);
-    this.mouseWorld.copy(worldPos);
-    const dx = this.mouseWorld.x - this.prevMouseWorld.x;
-    const dy = this.mouseWorld.y - this.prevMouseWorld.y;
-    this.mouseVelocity = Math.sqrt(dx * dx + dy * dy);
-  }
+  tick() {
+    if (this.uniforms.uGather.value < 0.98) return;
 
-  update(time: number) {
-    if (this.reconstructionStartTime < 0) return;
-
-    const elapsed = time - this.reconstructionStartTime;
-
-    if (elapsed >= this.maxDuration + 0.2) {
-      this.isReconstructed = true;
-    }
-
-    const mouseRadius = 0.25;
-    const rawVel = Math.max(0, this.mouseVelocity - 0.003);
+    const mouseRadius   = 0.25;
+    const rawVel        = Math.max(0, this.mouseVel - 0.003);
     const velocityForce = Math.min(rawVel * rawVel * 80, 0.04);
+    this.mouseVel      *= 0.8;
+
+    if (!this.hoverActive && velocityForce <= 0.001) return;
+
+    const lerpSpeed = 0.035;
+    const damping   = 0.94;
+    const SNAP      = 0.00008;
+
+    const offAttr = this.geometry.getAttribute('aOffset') as THREE.BufferAttribute;
+    let anyActive = false;
 
     for (let i = 0; i < this.count; i++) {
-      const i3 = i * 3;
+      const i2 = i * 2;
+      const ox = this.origins[i2];
+      const oy = this.origins[i2 + 1];
 
-      const ox = this.origins[i3];
-      const oy = this.origins[i3 + 1];
-      const oz = this.origins[i3 + 2];
+      let vx   = this.hoverVel[i2];
+      let vy   = this.hoverVel[i2 + 1];
+      let offX = this.hoverOff[i2];
+      let offY = this.hoverOff[i2 + 1];
 
-      if (!this.isReconstructed) {
-        const particleElapsed = elapsed - this.delays[i];
-        const t = Math.max(0, Math.min(1, particleElapsed / this.durations[i]));
-        const baseEased = applyEase(t, this.easeTypes[i]);
+      if (velocityForce > 0.001) {
+        const px   = ox + offX;
+        const py   = oy + offY;
+        const dx   = px - this.mouseX;
+        const dy   = py - this.mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
 
-        const pulseCenter = 0.5;
-        const pulseWidth = 0.12;
-        const pulseStrength = 0.18;
-        const distToPulse = Math.abs(t - pulseCenter);
-        const pulse = distToPulse < pulseWidth
-          ? Math.sin((1 - distToPulse / pulseWidth) * Math.PI) * pulseStrength
-          : 0;
-        const eased = Math.max(0, baseEased - pulse);
-
-        const sx = this.startPositions[i3];
-        const sy = this.startPositions[i3 + 1];
-        const sz = this.startPositions[i3 + 2];
-
-        const fadeOut = (1 - t) * (1 - t);
-        const driftPhase = t * Math.PI * 2 * this.driftFreq[i];
-        const driftStrength = fadeOut * 0.15;
-        const driftXVal = this.driftX[i] * Math.sin(driftPhase) * driftStrength;
-        const driftYVal = this.driftX[i] * Math.cos(driftPhase * 0.7 + this.wobblePhase[i]) * driftStrength;
-
-        const wobble = t > 0 && t < 1
-          ? Math.sin(time * 8 + this.wobblePhase[i]) * this.wobbleAmp[i] * fadeOut
-          : 0;
-
-        let px = sx + (ox - sx) * eased + driftXVal + wobble;
-        let py = sy + (oy - sy) * eased + driftYVal;
-        const pz = sz + (oz - sz) * eased;
-
-        let vx = this.velocities[i3];
-        let vy = this.velocities[i3 + 1];
-
-        if (velocityForce > 0.001) {
-          const dx = ox - this.mouseWorld.x;
-          const dy = oy - this.mouseWorld.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist < mouseRadius && dist > 0.001) {
-            const falloff = 1 - dist / mouseRadius;
-            const force = falloff * falloff * velocityForce;
-            const spreadAngle = (Math.random() - 0.5) * 2.0;
-            const baseAngle = Math.atan2(dy, dx);
-            const angle = baseAngle + spreadAngle;
-            const particleVariation = 0.5 + Math.random() * 1.0;
-            vx += Math.cos(angle) * force * particleVariation;
-            vy += Math.sin(angle) * force * particleVariation;
-          }
+        if (dist < mouseRadius && dist > 0.001) {
+          const falloff   = 1 - dist / mouseRadius;
+          const force     = falloff * falloff * velocityForce;
+          const angle     = Math.atan2(dy, dx) + (Math.random() - 0.5) * 2.0;
+          const variation = 0.5 + Math.random() * 1.0;
+          vx += Math.cos(angle) * force * variation;
+          vy += Math.sin(angle) * force * variation;
         }
-
-        vx *= 0.94;
-        vy *= 0.94;
-
-        px += vx;
-        py += vy;
-
-        this.velocities[i3] = vx;
-        this.velocities[i3 + 1] = vy;
-
-        this.positions[i3] = px;
-        this.positions[i3 + 1] = py;
-        this.positions[i3 + 2] = pz;
-
-        const startOp = this.startOpacities[i];
-        if (t <= 0) {
-          this.opacities[i] = startOp;
-        } else if (i % 2 === 0) {
-          this.opacities[i] = startOp + (1 - startOp) * eased * eased;
-        } else {
-          this.opacities[i] = t >= 0.95 ? startOp + (1 - startOp) * Math.min(1, (t - 0.95) / 0.05) : startOp;
-        }
-      } else {
-        let px = this.positions[i3];
-        let py = this.positions[i3 + 1];
-        let pz = this.positions[i3 + 2];
-
-        let vx = this.velocities[i3];
-        let vy = this.velocities[i3 + 1];
-        let vz = this.velocities[i3 + 2];
-
-        if (velocityForce > 0.001) {
-          const dx = px - this.mouseWorld.x;
-          const dy = py - this.mouseWorld.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist < mouseRadius && dist > 0.001) {
-            const falloff = 1 - dist / mouseRadius;
-            const force = falloff * falloff * velocityForce;
-            const spreadAngle = (Math.random() - 0.5) * 2.0;
-            const baseAngle = Math.atan2(dy, dx);
-            const angle = baseAngle + spreadAngle;
-            const particleVariation = 0.5 + Math.random() * 1.0;
-            vx += Math.cos(angle) * force * particleVariation;
-            vy += Math.sin(angle) * force * particleVariation;
-          }
-        }
-
-        vx *= 0.94;
-        vy *= 0.94;
-        vz *= 0.94;
-
-        px += vx;
-        py += vy;
-        pz += vz;
-
-        const lerpSpeed = 0.035;
-        px += (ox - px) * lerpSpeed;
-        py += (oy - py) * lerpSpeed;
-        pz += (oz - pz) * lerpSpeed;
-
-        this.positions[i3] = px;
-        this.positions[i3 + 1] = py;
-        this.positions[i3 + 2] = pz;
-
-        this.velocities[i3] = vx;
-        this.velocities[i3 + 1] = vy;
-        this.velocities[i3 + 2] = vz;
-
-        const ddx = px - ox;
-        const ddy = py - oy;
-        const distFromOrigin = Math.sqrt(ddx * ddx + ddy * ddy);
-        const maxFadeDist = 0.15;
-        this.opacities[i] = 0.5 + 0.5 * (1 - Math.min(1, distFromOrigin / maxFadeDist));
       }
+
+      vx *= damping;
+      vy *= damping;
+      offX += vx;
+      offY += vy;
+      offX += -offX * lerpSpeed;
+      offY += -offY * lerpSpeed;
+
+      if (Math.abs(vx) < SNAP && Math.abs(vy) < SNAP &&
+          Math.abs(offX) < SNAP && Math.abs(offY) < SNAP) {
+        vx = 0; vy = 0; offX = 0; offY = 0;
+      } else {
+        anyActive = true;
+      }
+
+      this.hoverVel[i2]     = vx;
+      this.hoverVel[i2 + 1] = vy;
+      this.hoverOff[i2]     = offX;
+      this.hoverOff[i2 + 1] = offY;
+      offAttr.setXY(i, offX, offY);
     }
 
-    this.geometry.attributes.position.needsUpdate = true;
-    this.geometry.attributes.opacity.needsUpdate = true;
+    offAttr.needsUpdate = true;
+    this.hoverActive = anyActive;
   }
 
   dispose() {
@@ -383,5 +279,3 @@ export class ParticleSystem {
     this.material.dispose();
   }
 }
-
-
